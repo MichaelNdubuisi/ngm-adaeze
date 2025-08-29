@@ -1,4 +1,5 @@
 const Product = require('../models/productModel');
+const responseHelpers = require('../utils/responseHelpers');
 
 // @desc    Get all products with pagination + search
 // @route   GET /api/products?page=1&keyword=shoes
@@ -16,13 +17,13 @@ exports.getProducts = async (req, res) => {
       .limit(pageSize)
       .skip(pageSize * (page - 1));
 
-    res.json({
+    res.json(responseHelpers.success('Products fetched successfully!', {
       products,
       page,
       pages: Math.ceil(count / pageSize),
-    });
+    }));
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch products', error: err.message });
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
 
@@ -34,16 +35,16 @@ const mongoose = require('mongoose');
 exports.getProductById = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid product ID format' });
+      return res.status(400).json(responseHelpers.error('Hmm, that product ID doesn\'t look quite right. Please check and try again. 🔍'));
     }
     const product = await Product.findById(req.params.id);
     if (product) {
-      res.json(product);
+      res.json(responseHelpers.success('Product details loaded successfully!', product));
     } else {
-      res.status(404).json({ message: 'Product not found' });
+      res.status(404).json(responseHelpers.notFound('Product'));
     }
   } catch (err) {
-    res.status(500).json({ message: 'Failed to get product', error: err.message });
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
 
@@ -63,29 +64,29 @@ exports.createProduct = async (req, res) => {
     if (req.file) {
       image = `/uploads/${req.file.filename}`;
     } else {
-      return res.status(400).json({ message: 'Product image is required.' });
+      return res.status(400).json(responseHelpers.error('A picture is worth a thousand words! Please upload an image for this product. 📸'));
     }
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ message: 'Product name is required.' });
+      return res.status(400).json(responseHelpers.error('Every great product needs a name! Please give this one a title. ✏️'));
     }
     if (!brand || typeof brand !== 'string' || !brand.trim()) {
-      return res.status(400).json({ message: 'Brand is required.' });
+      return res.status(400).json(responseHelpers.error('Which brand makes this amazing product? We\'d love to know! 🏷️'));
     }
     if (!category || typeof category !== 'string' || !category.trim()) {
-      return res.status(400).json({ message: 'Category is required.' });
+      return res.status(400).json(responseHelpers.error('Help shoppers find this product! Please choose a category. 📂'));
     }
     if (!description || typeof description !== 'string' || !description.trim()) {
-      return res.status(400).json({ message: 'Description is required.' });
+      return res.status(400).json(responseHelpers.error('Tell us more about this product! A good description helps customers understand what makes it special. 📝'));
     }
     // Parse price and countInStock
     price = parseFloat(price);
     if (isNaN(price) || price <= 0) {
-      return res.status(400).json({ message: 'Product price is required and must be a positive number.' });
+      return res.status(400).json(responseHelpers.error('Products need a price! Please enter a positive number for the price. 💰'));
     }
     countInStock = parseInt(countInStock);
     if (isNaN(countInStock) || countInStock < 0) {
-      return res.status(400).json({ message: 'Count in stock is required and must be a non-negative integer.' });
+      return res.status(400).json(responseHelpers.error('How many of these do we have? Please enter a valid stock quantity (0 or more). 📦'));
     }
     // Sizes validation for clothes/shoes
     let sizes = [];
@@ -98,7 +99,7 @@ exports.createProduct = async (req, res) => {
       }
     }
     if (needsSizes && (!sizes || !Array.isArray(sizes) || sizes.length === 0)) {
-      return res.status(400).json({ message: 'Sizes are required for clothes and shoes.' });
+      return res.status(400).json(responseHelpers.error('For clothing and shoes, sizes are essential! Please add at least one size option. 👕👟'));
     }
     const product = new Product({
       user: req.user._id,
@@ -112,9 +113,9 @@ exports.createProduct = async (req, res) => {
       sizes,
     });
     const createdProduct = await product.save();
-    res.status(201).json(createdProduct);
+    res.status(201).json(responseHelpers.success(responseHelpers.messages.created('Product'), createdProduct));
   } catch (err) {
-    res.status(500).json({ message: 'Failed to create product', error: err.message });
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
 
@@ -123,7 +124,7 @@ exports.createProduct = async (req, res) => {
 // @access  Private/Admin
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, image, brand, category, description, price, countInStock } = req.body;
+    const { name, image, brand, category, description, price, countInStock, sizes } = req.body;
     const product = await Product.findById(req.params.id);
 
     if (product) {
@@ -134,14 +135,23 @@ exports.updateProduct = async (req, res) => {
       product.description = description || product.description;
       product.price = price || product.price;
       product.countInStock = countInStock || product.countInStock;
+      
+      // Handle sizes field
+      if (sizes !== undefined) {
+        if (Array.isArray(sizes)) {
+          product.sizes = sizes;
+        } else if (typeof sizes === 'string') {
+          product.sizes = sizes.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
 
       const updatedProduct = await product.save();
-      res.json(updatedProduct);
+      res.json(responseHelpers.success(responseHelpers.messages.updated('Product'), updatedProduct));
     } else {
-      res.status(404).json({ message: 'Product not found' });
+      res.status(404).json(responseHelpers.notFound('Product'));
     }
   } catch (err) {
-    res.status(500).json({ message: 'Failed to update product', error: err.message });
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
 
@@ -150,15 +160,18 @@ exports.updateProduct = async (req, res) => {
 // @access  Private/Admin
 exports.deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (product) {
-      await product.remove();
-      res.json({ message: 'Product removed' });
+    console.log('DELETE request for product:', req.params.id);
+    const deleted = await Product.findByIdAndDelete(req.params.id);
+    if (deleted) {
+      console.log('Product deleted:', deleted._id);
+      res.json(responseHelpers.success(responseHelpers.messages.deleted('Product')));
     } else {
-      res.status(404).json({ message: 'Product not found' });
+      console.warn('Product not found for delete:', req.params.id);
+      res.status(404).json(responseHelpers.notFound('Product'));
     }
   } catch (err) {
-    res.status(500).json({ message: 'Failed to delete product', error: err.message });
+    console.error('Failed to delete product:', err.message);
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
 
@@ -176,7 +189,7 @@ exports.createProductReview = async (req, res) => {
       );
 
       if (alreadyReviewed) {
-        return res.status(400).json({ message: 'Product already reviewed' });
+        return res.status(400).json(responseHelpers.error('You\'ve already shared your thoughts on this product! Thanks for your feedback. 💭'));
       }
 
       const review = {
@@ -193,11 +206,11 @@ exports.createProductReview = async (req, res) => {
         product.reviews.length;
 
       await product.save();
-      res.status(201).json({ message: 'Review added' });
+      res.status(201).json(responseHelpers.success('Thank you for your review! Your feedback helps other shoppers. 🌟'));
     } else {
-      res.status(404).json({ message: 'Product not found' });
+      res.status(404).json(responseHelpers.notFound('Product'));
     }
   } catch (err) {
-    res.status(500).json({ message: 'Failed to create review', error: err.message });
+    res.status(500).json(responseHelpers.serverError(err));
   }
 };
