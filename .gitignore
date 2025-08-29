@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+  
+# production builds
+build/
+dist/
+
+# environment variables
+.env
+
+# misc
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-error.log*
+.vscode/
